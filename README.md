@@ -4,7 +4,17 @@ Playwright로 Google News RSS의 `news.google.com/rss/articles/CBM...` 링크를
 
 ## 설치
 
+가상환경(venv) 생성 및 활성화:
+
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+```
+
+의존성 설치:
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 playwright install chromium
 ```
@@ -13,6 +23,12 @@ playwright install chromium
 
 ```bash
 uvicorn app:app --reload
+```
+
+가상환경을 활성화하지 않고 바로 실행하려면:
+
+```bash
+.venv/bin/uvicorn app:app --reload
 ```
 
 브라우저에서 http://localhost:8000 접속.
