@@ -2,6 +2,24 @@
 
 Playwright로 Google News RSS의 `news.google.com/rss/articles/CBM...` 링크를 실제 기사 URL로 변환하는 웹 UI.
 
+## 스택
+
+백엔드:
+
+- Python 3 (venv)
+- FastAPI — HTTP API 프레임워크
+- Uvicorn — ASGI 서버
+- httpx — 비동기 HTTP 클라이언트 (RSS 피드 다운로드)
+- `xml.etree.ElementTree` — RSS XML 파싱 (표준 라이브러리)
+- Playwright (Chromium, headless) — Google News 링크를 실제 기사 URL로 해석
+- `asyncio.Semaphore(1)` + 1~2초 지터 — 동시성 제한 및 레이트리밋 회피
+- 프로세스 메모리 `dict` 캐시 — 피드 갱신 시 초기화
+
+프론트엔드:
+
+- 바닐라 HTML/CSS/JavaScript (프레임워크 없음)
+- `fetch` + `AbortController` — 해석 요청/중단
+
 ## 설치
 
 가상환경(venv) 생성 및 활성화:
