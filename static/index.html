@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>Google News RSS Resolver</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 960px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    line-height: 1.5;
+  }
+  h1 { margin-bottom: 0.2rem; }
+  .sub { color: #888; margin-bottom: 1.5rem; }
+  form {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  input[type=text] {
+    flex: 1;
+    padding: 0.6rem 0.8rem;
+    font-size: 1rem;
+    border: 1px solid #888;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+  }
+  button {
+    padding: 0.6rem 1rem;
+    font-size: 0.95rem;
+    border: 1px solid #4a8cf0;
+    background: #4a8cf0;
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: transparent;
+    color: #4a8cf0;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 1rem 0 0.5rem;
+  }
+  .count { color: #888; font-size: 0.9rem; }
+  ol { padding-left: 1.2rem; }
+  li {
+    margin-bottom: 1rem;
+    padding-bottom: 0.8rem;
+    border-bottom: 1px solid #33333322;
+  }
+  .title { font-weight: 600; }
+  .meta { font-size: 0.8rem; color: #888; margin: 0.2rem 0; }
+  .urls { font-size: 0.85rem; word-break: break-all; }
+  .urls div { margin: 0.15rem 0; }
+  .label {
+    display: inline-block;
+    min-width: 70px;
+    color: #888;
+  }
+  .pending { color: #c08a00; }
+  .error { color: #c0392b; }
+  .ok a { color: #2e7d32; }
+  .row-actions { margin-top: 0.3rem; }
+  .row-actions button {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.6rem;
+  }
+</style>
+</head>
+<body>
+<h1>Google News RSS Resolver</h1>
+<div class="sub">검색어로 Google News RSS를 받아온 뒤, Playwright로 실제 기사 URL을 해석합니다.</div>
+
+<form id="search-form">
+  <input type="text" id="query" placeholder="검색어 (예: OpenAI)" value="OpenAI" />
+  <button type="submit">피드 가져오기</button>
+</form>
+
+<div class="toolbar" id="toolbar" style="display:none;">
+  <span class="count" id="count"></span>
+  <span class="count" id="progress"></span>
+  <span class="count" id="stats"></span>
+  <button id="resolve-all">해석 시작</button>
+  <button class="secondary" id="stop" style="border-color:#c0392b;color:#c0392b;display:none;">중단</button>
+</div>
+
+<ol id="results"></ol>
+
+<script>
+const form = document.getElementById("search-form");
+const resultsEl = document.getElementById("results");
+const toolbar = document.getElementById("toolbar");
+const countEl = document.getElementById("count");
+const resolveAllBtn = document.getElementById("resolve-all");
+const stopBtn = document.getElementById("stop");
+const statsEl = document.getElementById("stats");
+const progressEl = document.getElementById("progress");
+
+let items = [];
+let stats = { done: 0, ok: 0, total: 0 };
+let abortCtrl = null;
+
+function updateStats() {
+  if (stats.total === 0) {
+    statsEl.textContent = "";
+    progressEl.textContent = "";
+    return;
+  }
+  const progPct = ((stats.done / stats.total) * 100).toFixed(1);
+  progressEl.textContent = `진행률 ${progPct}% (${stats.done}/${stats.total})`;
+  const okPct = stats.done ? ((stats.ok / stats.done) * 100).toFixed(1) : "0.0";
+  statsEl.textContent = `성공률 ${okPct}% (${stats.ok}/${stats.done})`;
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = document.getElementById("query").value.trim();
+  if (!q) return;
+  if (abortCtrl) abortCtrl.abort();
+  resolveAllBtn.disabled = false;
+  resolveAllBtn.textContent = "해석 시작";
+  stopBtn.style.display = "none";
+  resultsEl.innerHTML = "<li>불러오는 중...</li>";
+  toolbar.style.display = "none";
+  try {
+    const r = await fetch(`/api/feed?q=${encodeURIComponent(q)}`);
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    items = data.items;
+    stats = { done: 0, ok: 0, total: items.length };
+    updateStats();
+    render();
+    toolbar.style.display = "flex";
+    countEl.textContent = `${items.length}개 항목`;
+  } catch (err) {
+    resultsEl.innerHTML = `<li class="error">오류: ${err.message}</li>`;
+  }
+});
+
+function render() {
+  resultsEl.innerHTML = "";
+  items.forEach((it, idx) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <div class="title">${escapeHtml(it.title)}</div>
+      <div class="meta">${escapeHtml(it.source || "")} · ${escapeHtml(it.pubDate)}</div>
+      <div class="urls">
+        <div><span class="label">google:</span> <a href="${it.link}" target="_blank" rel="noreferrer">${escapeHtml(it.link)}</a></div>
+        <div id="final-${idx}"><span class="label">실제:</span> <span class="pending">아직 해석 안 됨</span></div>
+      </div>
+      <div class="row-actions">
+        <button data-idx="${idx}" class="resolve-one">이 항목 해석</button>
+      </div>
+    `;
+    resultsEl.appendChild(li);
+  });
+  resultsEl.querySelectorAll(".resolve-one").forEach(btn => {
+    btn.addEventListener("click", () => resolveOne(parseInt(btn.dataset.idx)));
+  });
+}
+
+async function resolveOne(idx, signal) {
+  const cell = document.getElementById(`final-${idx}`);
+  if (signal && signal.aborted) {
+    cell.innerHTML = `<span class="label">실제:</span> <span class="error">중단됨</span>`;
+    stats.done += 1;
+    updateStats();
+    return;
+  }
+  cell.innerHTML = `<span class="label">실제:</span> <span class="pending">해석 중...</span>`;
+  let success = false;
+  try {
+    const r = await fetch(`/api/resolve?url=${encodeURIComponent(items[idx].link)}`, { signal });
+    const data = await r.json();
+    if (data.final_url) {
+      cell.innerHTML = `<span class="label">실제:</span> <span class="ok"><a href="${data.final_url}" target="_blank" rel="noreferrer">${escapeHtml(data.final_url)}</a></span>`;
+      success = true;
+    } else {
+      cell.innerHTML = `<span class="label">실제:</span> <span class="error">해석 실패</span>`;
+    }
+  } catch (err) {
+    if (err.name === "AbortError") {
+      cell.innerHTML = `<span class="label">실제:</span> <span class="error">중단됨</span>`;
+    } else {
+      cell.innerHTML = `<span class="label">실제:</span> <span class="error">오류: ${escapeHtml(err.message)}</span>`;
+    }
+  }
+  stats.done += 1;
+  if (success) stats.ok += 1;
+  updateStats();
+}
+
+resolveAllBtn.addEventListener("click", async () => {
+  if (items.length === 0) return;
+  stats = { done: 0, ok: 0, total: items.length };
+  updateStats();
+  resolveAllBtn.disabled = true;
+  resolveAllBtn.textContent = "해석 중...";
+  stopBtn.style.display = "inline-block";
+  abortCtrl = new AbortController();
+  const tasks = items.map((_, idx) => resolveOne(idx, abortCtrl.signal));
+  await Promise.all(tasks);
+  resolveAllBtn.disabled = false;
+  resolveAllBtn.textContent = "해석 시작";
+  stopBtn.style.display = "none";
+  abortCtrl = null;
+});
+
+stopBtn.addEventListener("click", () => {
+  if (abortCtrl) abortCtrl.abort();
+});
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+</script>
+</body>
+</html>
