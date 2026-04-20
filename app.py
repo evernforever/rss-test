@@ -224,18 +224,26 @@ async def _fetch_rss_items(query: str, hl: str = "ko", gl: str = "KR", ceid: str
 SIMILARITY_THRESHOLD = 0.5
 
 
+def _has_korean(s: str) -> bool:
+    return any('\uac00' <= c <= '\ud7a3' for c in s)
+
+
 async def _fallback_by_title(title: str) -> Optional[str]:
     words = title.split()
     query = " ".join(words[:8]) if len(words) > 8 else title
-    log.info("[fallback] title='%s' query='%s'", title, query)
+    if _has_korean(title):
+        hl, gl, ceid = "ko", "KR", "KR:ko"
+    else:
+        hl, gl, ceid = "en", "US", "US:en"
+    log.info("[fallback] title='%s' query='%s' locale=%s", title, query, hl)
     try:
-        candidates = await _fetch_rss_items(query)
+        candidates = await _fetch_rss_items(query, hl=hl, gl=gl, ceid=ceid)
     except Exception as e:
         log.error("[fallback] RSS fetch failed: %s", e)
-        return None
+        return None, 0.0, "none"
     if not candidates:
         log.info("[fallback] no candidates")
-        return None
+        return None, 0.0, "none"
 
     best_score = 0.0
     best_method = "none"
