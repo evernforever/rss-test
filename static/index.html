@@ -311,11 +311,11 @@ async function resolveOne(idx, signal) {
       const fb = data.fallback ? ` <span class="pending">(유사기사 대체 ${(data.similarity * 100).toFixed(0)}% · ${data.method})</span>` : '';
       cell.innerHTML = `<span class="label">실제:</span> <span class="ok"><a href="${data.final_url}" target="_blank" rel="noreferrer">${escapeHtml(data.final_url)}</a></span>${fb}`;
       success = true;
+    } else if (data.fallback_attempted) {
+      cell.innerHTML = `<span class="label">실제:</span> <span class="pending">유사대체기사 없음 (최고 유사도 ${(data.similarity * 100).toFixed(0)}% · ${data.method})</span>`;
+      success = true;
     } else {
-      const reason = data.fallback_attempted
-        ? ` <span class="meta">(유사대체기사 없음, 최고 유사도 ${(data.similarity * 100).toFixed(0)}% · ${data.method})</span>`
-        : '';
-      cell.innerHTML = `<span class="label">실제:</span> <span class="error">해석 실패</span>${reason}`;
+      cell.innerHTML = `<span class="label">실제:</span> <span class="error">해석 실패</span>`;
     }
   } catch (err) {
     if (err.name === "AbortError") {
