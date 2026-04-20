@@ -49,7 +49,15 @@
     align-items: center;
     margin: 1rem 0 0.5rem;
   }
-  .count { color: #888; font-size: 0.9rem; }
+  .count {
+    color: #888;
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+    display: inline-block;
+  }
+  #progress { min-width: 12em; }
+  #stats { min-width: 11em; }
+  #elapsed { min-width: 9em; }
   ol { padding-left: 1.2rem; }
   li {
     margin-bottom: 1rem;
@@ -73,14 +81,59 @@
     font-size: 0.8rem;
     padding: 0.25rem 0.6rem;
   }
+  .samples { margin-bottom: 1.5rem; }
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #33333322;
+    margin-bottom: 0.8rem;
+  }
+  .tab-bar button {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    background: transparent;
+    color: #888;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .tab-bar button.active {
+    color: #4a8cf0;
+    border-bottom-color: #4a8cf0;
+    font-weight: 600;
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .sample-btn {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.82rem;
+    border: 1px solid #33333344;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .sample-btn:hover { background: #4a8cf022; border-color: #4a8cf0; }
 </style>
 </head>
 <body>
 <h1>Google News RSS Resolver</h1>
 <div class="sub">검색어로 Google News RSS를 받아온 뒤, Playwright로 실제 기사 URL을 해석합니다.</div>
 
+<div class="samples">
+  <div class="tab-bar" id="tab-bar">
+    <button data-tab="domestic" class="active">국내</button>
+    <button data-tab="global">해외</button>
+    <button data-tab="trends">트렌드</button>
+  </div>
+  <div id="panel-domestic" class="tab-panel active"></div>
+  <div id="panel-global" class="tab-panel"></div>
+  <div id="panel-trends" class="tab-panel"></div>
+</div>
+
 <form id="search-form">
-  <input type="text" id="query" placeholder="검색어 (예: OpenAI)" value="OpenAI" />
+  <input type="text" id="query" placeholder="검색어 (예: OpenAI)" />
   <button type="submit">피드 가져오기</button>
 </form>
 
@@ -88,13 +141,76 @@
   <span class="count" id="count"></span>
   <span class="count" id="progress"></span>
   <span class="count" id="stats"></span>
+  <span class="count" id="elapsed"></span>
   <button id="resolve-all">해석 시작</button>
   <button class="secondary" id="stop" style="border-color:#c0392b;color:#c0392b;display:none;">중단</button>
 </div>
 
 <ol id="results"></ol>
 
+<hr style="margin:2rem 0;opacity:0.2;" />
+
+<h2 style="font-size:1.1rem;">디버그: 특정 URL 테스트</h2>
+<div class="sub" style="font-size:0.85rem;">하드코딩된 문제 URL 목록을 순차적으로 해석합니다.</div>
+<button id="debug-run">디버그 URL 해석</button>
+<ol id="debug-results" style="margin-top:1rem;"></ol>
+
 <script>
+const SAMPLES = {
+  domestic: [
+    { label: "규제", q: "가상자산 규제 OR 디지털자산법 OR 대주주 지분규제 OR 가상자산 은행 발행 OR 원화 스테이블코인 OR 스테이블코인 법안 OR 국회 가상자산 OR 국회 스테이블코인 OR 한국은행 스테이블코인 OR 한은 가상자산 OR 기획재정부 가상자산 OR 금융위원회 스테이블코인 OR 금감원 가상자산 OR 가상자산 입법 OR 스테이블코인 제정" },
+    { label: "시장", q: "암호화폐 시장 OR 원화 스테이블코인 OR 역외 가상자산 OR 가상자산 파생상품" },
+    { label: "경쟁사", q: "빗썸 OR 코빗 OR 코인원 OR 고팍스 OR 거래소 OR 서클 거래소 OR Circle 거래소 OR USDC 국내 거래소" },
+    { label: "두나무", q: "두나무 OR 업비트 OR 기와체인" },
+  ],
+  global: [
+    { label: "시장", q: "bitcoin price OR crypto market OR BTC ETF inflow OR institutional bitcoin OR MicroStrategy bitcoin OR crypto market cap OR global crypto sentiment OR bitcoin ETF OR crypto trading volume OR RWA tokenization OR tokenized asset OR TradFi DeFi OR institutional crypto OR BlackRock crypto OR geopolitical crypto OR macro risk bitcoin OR risk off crypto OR safe haven bitcoin OR global tension bitcoin OR war crypto OR sanctions crypto OR inflation bitcoin OR interest rate crypto OR recession bitcoin OR Trump bitcoin OR tariff crypto OR pension fund bitcoin" },
+    { label: "시장 (KR)", q: "글로벌 가상자산 시장 OR 비트코인 시장 OR 기관 가상자산 투자 OR RWA 토큰화 OR TradFi DeFi OR 비트코인 ETF OR 가상자산 거시경제" },
+    { label: "규제 (KR)", q: "SEC 가상자산 OR CFTC 가상자산 OR 글로벌 가상자산 규제 OR 스테이블코인 법안 OR MiCA OR 가상자산 과세 OR 디지털자산 세금" },
+    { label: "규제", q: "SEC crypto OR CFTC crypto OR crypto regulation OR digital asset bill OR FIT21 OR stablecoin bill OR crypto legislation OR Gensler crypto OR MiCA OR crypto tax OR bitcoin tax OR digital asset tax OR crypto taxation" },
+    { label: "Coinbase", q: "코인베이스 OR Coinbase OR Coinbase wallet OR Coinbase agentic OR Base network OR Base blockchain OR Base L2" },
+    { label: "Binance", q: "바이낸스 OR Binance OR Binance wallet OR Binance agentic" },
+    { label: "OKX", q: "OKX exchange OR OKX crypto OR OKX trading OR OKX wallet OR OKX agentic OR OKX launch" },
+    { label: "Kraken", q: "Kraken crypto OR Kraken exchange OR Kraken trading OR Kraken wallet OR Kraken agentic" },
+    { label: "Bybit", q: "바이비트 OR Bybit OR Bybit wallet OR Bybit agentic" },
+  ],
+  trends: [
+    { label: "스테이블코인 결제 (글로벌)", q: "stablecoin payment OR USDC Visa OR USDT Mastercard OR Circle CPN OR Redotpay OR BVNK OR Rain card OR Stripe stablecoin OR crypto card OR stablecoin settlement OR 스테이블코인 결제 OR 가상자산 카드" },
+    { label: "스테이블코인 결제 (국내)", q: "스테이블코인 결제 OR 가상자산 결제 OR PG사 가상자산 OR 가상자산 카드결제 OR 크립토닷컴 결제 OR 신한카드 스테이블코인 OR KB카드 스테이블코인 OR 현대카드 스테이블코인 OR 카드사 스테이블코인 OR 카드사 블록체인" },
+    { label: "온체인 결제", q: "x402 protocol OR onchain payment OR AI agent payment OR machine to machine payment OR Google AP2 OR crypto payment protocol OR onchain B2B OR blockchain payment protocol OR programmable payment OR crypto payment infrastructure OR Visa blockchain OR Visa crypto OR Visa onchain OR Mastercard blockchain OR Mastercard crypto OR Mastercard onchain" },
+    { label: "DEX·DeFi", q: "Hyperliquid OR Uniswap OR PancakeSwap OR dYdX OR GMX OR 탈중앙화 거래소 OR 온체인 파생상품 OR Perp DEX OR DEX 거래량 OR NYSE crypto OR S&P Hyperliquid OR Nasdaq DeFi OR traditional exchange DEX OR CME crypto OR TradFi DeFi OR CBOE blockchain OR stock exchange onchain OR DeFi OR smart contract OR Binance Alpha OR DEX aggregator" },
+    { label: "예측시장", q: "예측시장 OR 폴리마켓 OR Polymarket OR Kalshi OR Metaculus OR prediction market OR CFTC prediction market OR Polymarket funding OR Polymarket investment OR Kalshi funding OR Kalshi raises OR prediction market raises OR prediction market funding OR prediction market valuation" },
+    { label: "AI (글로벌)", q: "Claude Anthropic OR ChatGPT OR OpenAI OR Gemini OR GPT-5 OR AI 에이전트 OR Perplexity OR AI 모델 출시 OR LLM OR AI 규제 OR enterprise AI OR AI adoption OR AI agent OR Grok OR Mistral" },
+    { label: "AI (국내)", q: "AI 도입 OR 인공지능 기업 도입 OR 생성형 AI 기업 OR 대기업 AI OR AI 전략 OR AI 에이전트 도입 OR 국내 AI 시장 OR 삼성 AI OR SK AI OR LG AI" },
+    { label: "핀테크", q: "카카오페이 OR 토스 OR 네이버페이 OR 뱅크샐러드 OR Robinhood OR Stripe OR Revolut OR Nubank OR Klarna OR 핀테크 OR fintech" },
+    { label: "체인·월렛", q: "mainnet launch OR 메인넷 런칭 OR L1 blockchain OR L2 mainnet OR MetaMask OR Phantom wallet OR Coinbase Base OR 비수탁 지갑 OR self-custody wallet OR crypto wallet update OR 지갑 업데이트 OR chain upgrade OR agentic wallet OR AI agent wallet OR smart wallet crypto" },
+  ],
+};
+
+const queryInput = document.getElementById("query");
+const tabBar = document.getElementById("tab-bar");
+
+function renderSamples() {
+  for (const [key, list] of Object.entries(SAMPLES)) {
+    const panel = document.getElementById(`panel-${key}`);
+    list.forEach(s => {
+      const btn = document.createElement("button");
+      btn.className = "sample-btn";
+      btn.textContent = s.label;
+      btn.addEventListener("click", () => { queryInput.value = s.q; });
+      panel.appendChild(btn);
+    });
+  }
+}
+renderSamples();
+
+tabBar.addEventListener("click", (e) => {
+  const tab = e.target.dataset?.tab;
+  if (!tab) return;
+  tabBar.querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === `panel-${tab}`));
+});
+
 const form = document.getElementById("search-form");
 const resultsEl = document.getElementById("results");
 const toolbar = document.getElementById("toolbar");
@@ -103,6 +219,17 @@ const resolveAllBtn = document.getElementById("resolve-all");
 const stopBtn = document.getElementById("stop");
 const statsEl = document.getElementById("stats");
 const progressEl = document.getElementById("progress");
+const elapsedEl = document.getElementById("elapsed");
+let elapsedTimer = null;
+let elapsedStart = 0;
+
+function fmtDuration(ms) {
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}초`;
+  const m = Math.floor(s / 60);
+  const rem = (s - m * 60).toFixed(1);
+  return `${m}분 ${rem}초`;
+}
 
 let items = [];
 let stats = { done: 0, ok: 0, total: 0 };
@@ -178,13 +305,17 @@ async function resolveOne(idx, signal) {
   cell.innerHTML = `<span class="label">실제:</span> <span class="pending">해석 중...</span>`;
   let success = false;
   try {
-    const r = await fetch(`/api/resolve?url=${encodeURIComponent(items[idx].link)}`, { signal });
+    const r = await fetch(`/api/resolve?url=${encodeURIComponent(items[idx].link)}&title=${encodeURIComponent(items[idx].title)}`, { signal });
     const data = await r.json();
     if (data.final_url) {
-      cell.innerHTML = `<span class="label">실제:</span> <span class="ok"><a href="${data.final_url}" target="_blank" rel="noreferrer">${escapeHtml(data.final_url)}</a></span>`;
+      const fb = data.fallback ? ` <span class="pending">(유사기사 대체 ${(data.similarity * 100).toFixed(0)}% · ${data.method})</span>` : '';
+      cell.innerHTML = `<span class="label">실제:</span> <span class="ok"><a href="${data.final_url}" target="_blank" rel="noreferrer">${escapeHtml(data.final_url)}</a></span>${fb}`;
       success = true;
     } else {
-      cell.innerHTML = `<span class="label">실제:</span> <span class="error">해석 실패</span>`;
+      const reason = data.fallback_attempted
+        ? ` <span class="meta">(유사대체기사 없음, 최고 유사도 ${(data.similarity * 100).toFixed(0)}% · ${data.method})</span>`
+        : '';
+      cell.innerHTML = `<span class="label">실제:</span> <span class="error">해석 실패</span>${reason}`;
     }
   } catch (err) {
     if (err.name === "AbortError") {
@@ -206,8 +337,17 @@ resolveAllBtn.addEventListener("click", async () => {
   resolveAllBtn.textContent = "해석 중...";
   stopBtn.style.display = "inline-block";
   abortCtrl = new AbortController();
+  elapsedStart = Date.now();
+  elapsedEl.textContent = `경과 0.0초`;
+  elapsedTimer = setInterval(() => {
+    elapsedEl.textContent = `경과 ${fmtDuration(Date.now() - elapsedStart)}`;
+  }, 100);
   const tasks = items.map((_, idx) => resolveOne(idx, abortCtrl.signal));
   await Promise.all(tasks);
+  clearInterval(elapsedTimer);
+  elapsedTimer = null;
+  const total = Date.now() - elapsedStart;
+  elapsedEl.textContent = `총 ${fmtDuration(total)}`;
   resolveAllBtn.disabled = false;
   resolveAllBtn.textContent = "해석 시작";
   stopBtn.style.display = "none";
@@ -216,6 +356,70 @@ resolveAllBtn.addEventListener("click", async () => {
 
 stopBtn.addEventListener("click", () => {
   if (abortCtrl) abortCtrl.abort();
+});
+
+const DEBUG_ITEMS = [
+  {
+    url: "https://news.google.com/rss/articles/CBMiU0FVX3lxTE9GT0U5dGhFZTdLdkh2N19pbjFlNy1FU0NJTlZISlFNaWxlOW1TOFVLb1NXazFlb3NTXzRMS0ZaZFEtOWpqeWlrOGhfNHRDeFhDN0I0",
+    title: "[기자수첩] '가상자산 서킷브레이커' - 스트레이트뉴스",
+  },
+  {
+    url: "https://news.google.com/rss/articles/CBMia0FVX3lxTFBCQVAwVk9WRFk4ME9RNlVGbEsxV0xURHFacm56ZFFOTGlBYmNkSFNFeTZhQ1hyN0tvN3pGdmk1cGFEZC0zaXdRZ1RER1JoSVdTdkIyQW84bFJ0SEdsVDRIenZqQ3lOd1lHZnRj",
+    title: "가상자산 2단계 법안 하반기 논의 관측",
+  },
+  {
+    url: "https://news.google.com/rss/articles/CBMivAFBVV95cUxOY0N0ZzlKYlJnR3JiWVhiUWNBOTdQSGFCczVfcEpzbEN2Mmt5WlNoeFhLRmNEVmdqREFsckZVeUQzZWREYmhEU0NWWm5PVFlRV2g0WW1XcmhhRWZrMXhqZVF4SVBJUmZkNzlnT0RZRWpjS0pka2lDN0V3TXpXY1pZXzNxV2ZjV1JVRzNpVV9QNkU1cHVkZ2tsdVoyQUhOMEZKekpRd1E5SEFXX0dtMnZEdHJUXy1zdjF4QUVJNA",
+    title: "가상자산거래소 지분 규제는 적절한 해법일까",
+  },
+  {
+    url: "https://news.google.com/rss/articles/CBMivgFBVV95cUxQT0FRQnBNTjhTTEtvcHVycnhLNlVROHZlSV9maTVNWkNwWW5QWEJqU2hIR213ZlMyOVZVZEM1NTZndnhza3lBSE5ocWxPcEViM3ZxLUR6VEhxUjFNWHBLSkZoRGF2NEVrbnRVQTlfLVNHRV9oYWtaTURyejVJOFlva2xjZWFkZC11em9tcE1LLU1wdzJTWkdvT0RNQWFDWmtWVm9EX05YWUE2aXJpVS0zSjY3a2N3V1BMTXA0TFNR",
+    title: "[포커스] 스테이블코인 판 키우는 거래소",
+  },
+];
+
+const debugBtn = document.getElementById("debug-run");
+const debugResultsEl = document.getElementById("debug-results");
+
+debugBtn.addEventListener("click", async () => {
+  debugBtn.disabled = true;
+  debugBtn.textContent = "해석 중...";
+  debugResultsEl.innerHTML = "";
+  DEBUG_ITEMS.forEach((item, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <div class="title">${escapeHtml(item.title)}</div>
+      <div class="urls">
+        <div><span class="label">google:</span> <a href="${item.url}" target="_blank" rel="noreferrer">${escapeHtml(item.url.slice(0, 100))}${item.url.length > 100 ? "..." : ""}</a></div>
+        <div id="debug-final-${i}"><span class="label">실제:</span> <span class="pending">대기 중</span></div>
+        <div class="meta">길이: ${item.url.length}자</div>
+      </div>
+    `;
+    debugResultsEl.appendChild(li);
+  });
+  for (let i = 0; i < DEBUG_ITEMS.length; i++) {
+    const item = DEBUG_ITEMS[i];
+    const cell = document.getElementById(`debug-final-${i}`);
+    cell.innerHTML = `<span class="label">실제:</span> <span class="pending">해석 중...</span>`;
+    const start = Date.now();
+    try {
+      const r = await fetch(`/api/resolve?url=${encodeURIComponent(item.url)}&title=${encodeURIComponent(item.title)}`);
+      const data = await r.json();
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+      if (data.final_url) {
+        const fb = data.fallback ? ` <span class="pending">(유사기사 대체 ${(data.similarity * 100).toFixed(0)}% · ${data.method})</span>` : '';
+        cell.innerHTML = `<span class="label">실제:</span> <span class="ok"><a href="${data.final_url}" target="_blank" rel="noreferrer">${escapeHtml(data.final_url)}</a></span>${fb} <span class="meta">(${elapsed}s)</span>`;
+      } else {
+        const reason = data.fallback_attempted
+          ? ` <span class="meta">(유사대체기사 없음, 최고 유사도 ${(data.similarity * 100).toFixed(0)}% · ${data.method})</span>`
+          : '';
+        cell.innerHTML = `<span class="label">실제:</span> <span class="error">해석 실패</span>${reason} <span class="meta">(${elapsed}s)</span>`;
+      }
+    } catch (err) {
+      cell.innerHTML = `<span class="label">실제:</span> <span class="error">오류: ${escapeHtml(err.message)}</span>`;
+    }
+  }
+  debugBtn.disabled = false;
+  debugBtn.textContent = "디버그 URL 해석";
 });
 
 function escapeHtml(s) {
